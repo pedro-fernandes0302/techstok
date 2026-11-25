@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Aviso from '../components/Aviso'
 import PageHeader from '../components/PageHeader'
+import useConfirmacao from '../components/useConfirmacao'
 import { api, ErroApi } from '../services/api'
 import type { ProdutoOpcoes, Recibo } from '../types'
 
@@ -16,8 +17,18 @@ export default function PDV() {
   const [recibo, setRecibo] = useState<Recibo | null>(null)
   const [erro, setErro] = useState('')
   const [sucesso, setSucesso] = useState('')
+  const [avisoEstoque, setAvisoEstoque] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const { confirmar, modal } = useConfirmacao()
+  const chaveIdempotencia = useRef<{fingerprint: string; key: string} | null>(null)
 
   useEffect(() => { api.produtos.opcoes().then(setOpcoes).catch(e => setErro(e.message)) }, [])
+  useEffect(() => {
+    if (!avisoEstoque) return
+    const temporizador = window.setTimeout(() => setAvisoEstoque(''), 6000)
+    return () => window.clearTimeout(temporizador)
+  }, [avisoEstoque])
+
   const total = useMemo(() => carrinho.reduce((soma, item) => {
     const p = opcoes.produtos.find(p => p.id === item.id_produto)
     return soma + Math.round((p?.preco ?? 0) * 100) * item.quantidade
@@ -36,13 +47,38 @@ export default function PDV() {
     setQuantidade(1)
   }
 
+  async function removerDoCarrinho(idProduto: number, nome: string) {
+    if (!await confirmar({
+      titulo: 'Remover item do carrinho',
+      mensagem: `Confirma a remoção de “${nome}” desta venda?`,
+      confirmarTexto: 'Remover',
+      perigo: true,
+    })) return
+    setCarrinho(atual => atual.filter(item => item.id_produto !== idProduto))
+  }
+
   async function finalizar() {
     setErro('')
     setSucesso('')
-    setRecibo(null)
     try {
       if (!cliente || !carrinho.length) throw new Error('Selecione um cliente e adicione itens à venda.')
-      const venda = await api.vendas.registrar({ id_cliente: Number(cliente), itens: carrinho })
+      if (!await confirmar({
+        titulo: 'Finalizar venda B2B',
+        mensagem: `Confirma a venda de ${carrinho.length} produto(s) para ${opcoes.clientes.find(c => c.id === Number(cliente))?.nome ?? 'o cliente selecionado'}, no total de ${moeda.format(total)}?`,
+        confirmarTexto: 'Finalizar venda',
+      })) return
+      setSalvando(true)
+      setRecibo(null)
+      const dadosVenda = {
+        id_cliente: Number(cliente),
+        itens: [...carrinho].sort((a, b) => a.id_produto - b.id_produto),
+      }
+      const fingerprint = JSON.stringify(dadosVenda)
+      if (chaveIdempotencia.current?.fingerprint !== fingerprint) {
+        chaveIdempotencia.current = { fingerprint, key: crypto.randomUUID() }
+      }
+      const venda = await api.vendas.registrar(dadosVenda, chaveIdempotencia.current.key)
+      chaveIdempotencia.current = null
       setSucesso(`Venda ${venda.numero_pedido} registrada.`)
       setCarrinho([])
       try {
@@ -56,13 +92,28 @@ export default function PDV() {
     } catch (e) {
       if (e instanceof ErroApi) {
         setErro(`${e.message} O backend rejeitou a venda e reverteu integralmente a transação.`)
+        if (e.status === 409) {
+          setAvisoEstoque(e.message)
+          try {
+            setOpcoes(await api.produtos.opcoes())
+          } catch (atualizacao) {
+            setErro(`${e.message} Não foi possível atualizar o saldo: ${(atualizacao as Error).message}`)
+          }
+        }
       } else {
         setErro('Não foi possível confirmar a resposta da venda. Consulte o histórico antes de tentar novamente.')
       }
+    } finally {
+      setSalvando(false)
     }
   }
 
   return <>
+    {modal}
+    {avisoEstoque && <div className="estoque-toast" role="alert">
+      <span>{avisoEstoque}</span>
+      <button type="button" aria-label="Fechar notificação" onClick={() => setAvisoEstoque('')}>×</button>
+    </div>}
     <PageHeader titulo="PDV B2B" subtitulo="Venda multi-itens com baixa de estoque atômica" />
     <Aviso tipo="erro" mensagem={erro} /><Aviso mensagem={sucesso} />
     {!recibo ? <>
@@ -92,10 +143,10 @@ export default function PDV() {
           <tbody>{carrinho.map(item => {
             const p = opcoes.produtos.find(p => p.id === item.id_produto)
             if (!p) return null
-            return <tr key={p.id}><td>{p.sku} · {p.nome}</td><td>{item.quantidade}</td><td>{moeda.format(p.preco)}</td><td>{moeda.format(Math.round(p.preco * 100) * item.quantidade / 100)}</td><td><button className="danger-button" onClick={() => setCarrinho(atual => atual.filter(x => x.id_produto !== p.id))}>Remover</button></td></tr>
+            return <tr key={p.id}><td>{p.sku} · {p.nome}</td><td>{item.quantidade}</td><td>{moeda.format(p.preco)}</td><td>{moeda.format(Math.round(p.preco * 100) * item.quantidade / 100)}</td><td><button className="danger-button" onClick={() => removerDoCarrinho(p.id, p.nome)}>Remover</button></td></tr>
           })}{!carrinho.length && <tr><td colSpan={5} className="empty">Adicione um ou mais produtos.</td></tr>}</tbody>
         </table></div>
-        <div className="panel-heading"><strong>Total: {moeda.format(total)}</strong><button className="primary-button" disabled={!carrinho.length} onClick={finalizar}>Finalizar venda</button></div>
+        <div className="panel-heading"><strong>Total: {moeda.format(total)}</strong><button className="primary-button" disabled={!carrinho.length || salvando} onClick={finalizar}>{salvando ? 'Registrando venda...' : 'Finalizar venda'}</button></div>
       </section>
     </> : <section className="panel" style={{ padding: 24 }}>
       <h2>Recibo de Faturamento B2B</h2>

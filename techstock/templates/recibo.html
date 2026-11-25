@@ -5,30 +5,136 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Recibo {{ recibo.numero_pedido }} - TechStore</title>
   <style>
-    body{font-family:Arial,sans-serif;max-width:900px;margin:2rem auto;color:#172033}
-    table{width:100%;border-collapse:collapse;margin:1.5rem 0}
-    th,td{border-bottom:1px solid #ddd;padding:.7rem;text-align:left}
-    .total{text-align:right;font-size:1.2rem}
-    @media print{button{display:none}body{margin:0 auto}}
+    :root{font-family:Inter,"Segoe UI",Arial,sans-serif;color:#172033;background:#f3f5f9;font-synthesis:none;text-rendering:optimizeLegibility}
+    *{box-sizing:border-box}
+    body{margin:0;padding:40px 20px}
+    .toolbar{max-width:900px;margin:0 auto 18px;display:flex;justify-content:space-between;align-items:center;color:#687386;font-size:14px}
+    .toolbar-actions{display:flex;gap:10px}
+    .button{border:0;border-radius:8px;padding:11px 16px;font:inherit;font-weight:700;text-decoration:none;cursor:pointer}
+    .button-print{background:#315fce;color:#fff}
+    .button-back{background:#fff;color:#344054;border:1px solid #dfe4ed}
+    .receipt{max-width:900px;margin:0 auto;background:#fff;border:1px solid #e4e8f0;border-radius:14px;box-shadow:0 12px 38px rgba(24,39,75,.09);overflow:hidden}
+    .receipt-header{padding:34px 42px 28px;background:linear-gradient(120deg,#172b55,#315fce);color:#fff;display:flex;justify-content:space-between;gap:24px;align-items:flex-start}
+    .brand{font-size:13px;font-weight:800;letter-spacing:2px;text-transform:uppercase;opacity:.8}
+    h1{font-size:25px;line-height:1.2;margin:9px 0 0}
+    .order-number{text-align:right}
+    .order-number span,.label{display:block;color:#aab8d5;font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase}
+    .order-number strong{display:block;margin-top:6px;font-size:18px}
+    .receipt-body{padding:32px 42px 38px}
+    .details{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:30px}
+    .detail-card{padding:16px 18px;border:1px solid #e8ebf1;border-radius:9px;background:#fbfcfe}
+    .label{color:#7b8799}
+    .detail-card strong{display:block;margin-top:7px;font-size:15px}
+    .detail-card p{margin:5px 0 0;color:#697386;font-size:13px}
+    .section-title{margin:0 0 12px;font-size:15px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th{padding:12px 10px;background:#f5f7fb;color:#657187;text-align:left;font-size:10px;letter-spacing:.7px;text-transform:uppercase;border-top:1px solid #e7ebf2;border-bottom:1px solid #e7ebf2}
+    td{padding:14px 10px;border-bottom:1px solid #edf0f4;color:#344054;vertical-align:top}
+    th:first-child,td:first-child{padding-left:14px}
+    .numeric{text-align:right;white-space:nowrap}
+    .product-name{font-weight:700;color:#202b40}
+    .sku{display:block;margin-top:4px;color:#7b8799;font-size:11px}
+    .totals{display:flex;justify-content:flex-end;margin-top:20px}
+    .total-box{width:min(100%,320px);padding:17px 19px;background:#f5f7fb;border-radius:9px}
+    .total-line{display:flex;justify-content:space-between;align-items:center;gap:20px;color:#657187;font-size:13px}
+    .total-line strong{color:#172033;font-size:21px}
+    .receipt-footer{margin-top:30px;padding-top:18px;border-top:1px solid #e8ebf1;display:flex;justify-content:space-between;gap:20px;color:#697386;font-size:12px}
+    .receipt-footer strong{color:#344054}
+    @media(max-width:640px){
+      body{padding:18px 10px}.toolbar{align-items:flex-start;gap:12px;flex-direction:column}
+      .receipt-header{padding:25px 22px;flex-direction:column}.order-number{text-align:left}
+      .receipt-body{padding:23px 16px}.details{grid-template-columns:1fr}
+      .table-wrap{overflow-x:auto}table{min-width:620px}
+      .receipt-footer{flex-direction:column}
+    }
+    @page{size:A4;margin:16mm}
+    @media print{
+      :root{background:#fff}
+      body{padding:0;background:#fff}
+      .toolbar{display:none}
+      .receipt{max-width:none;border:0;border-radius:0;box-shadow:none}
+      .receipt-header{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .detail-card,.total-box,th{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .receipt-body{padding:24px 0}
+      tr{break-inside:avoid}
+      .receipt-footer{break-inside:avoid}
+    }
   </style>
 </head>
 <body>
-  <button onclick="window.print()">Imprimir recibo</button>
-  <h1>TechStore — Recibo de Faturamento B2B</h1>
-  <p><strong>Pedido:</strong> {{ recibo.numero_pedido }} · <strong>Data/hora:</strong> {{ recibo.data_venda }}</p>
-  <p><strong>Cliente:</strong> {{ recibo.cliente_nome }} · <strong>CNPJ:</strong> {{ recibo.cliente_cnpj }}</p>
-  <p><strong>E-mail:</strong> {{ recibo.cliente_email }}</p>
-  <table>
-    <thead><tr><th>SKU</th><th>Produto</th><th>Quantidade</th><th>Preço unitário</th><th>Subtotal</th></tr></thead>
-    <tbody>{% for item in recibo.itens %}
-      <tr>
-        <td>{{ item.sku }}</td><td>{{ item.produto }}</td><td>{{ item.quantidade }}</td>
-        <td>R$ {{ '%.2f'|format(item.preco_unitario_centavos / 100) }}</td>
-        <td>R$ {{ '%.2f'|format(item.subtotal_centavos / 100) }}</td>
-      </tr>
-    {% endfor %}</tbody>
-  </table>
-  <p class="total"><strong>Total: R$ {{ '%.2f'|format(recibo.valor_total_centavos / 100) }}</strong></p>
-  <p><strong>Operador:</strong> {{ recibo.operador }} ({{ recibo.operador_email }})</p>
+  <nav class="toolbar" aria-label="Ações do recibo">
+    <span>Recibo de faturamento B2B</span>
+    <div class="toolbar-actions">
+      <button class="button button-back" type="button" onclick="window.close()">Fechar</button>
+      <button class="button button-print" type="button" onclick="window.print()">Imprimir recibo</button>
+    </div>
+  </nav>
+
+  <main class="receipt">
+    <header class="receipt-header">
+      <div>
+        <div class="brand">TechStore</div>
+        <h1>Recibo de Faturamento B2B</h1>
+      </div>
+      <div class="order-number">
+        <span>Número do pedido</span>
+        <strong>{{ recibo.numero_pedido }}</strong>
+      </div>
+    </header>
+
+    <div class="receipt-body">
+      <section class="details" aria-label="Dados da venda e do cliente">
+        <div class="detail-card">
+          <span class="label">Cliente</span>
+          <strong>{{ recibo.cliente_nome }}</strong>
+          <p>CNPJ: {{ recibo.cliente_cnpj }}</p>
+          <p>{{ recibo.cliente_email }}</p>
+        </div>
+        <div class="detail-card">
+          <span class="label">Dados do pedido</span>
+          <strong>{{ recibo.data_venda }}</strong>
+          <p>Operador: {{ recibo.operador }}</p>
+          <p>{{ recibo.operador_email }}</p>
+        </div>
+      </section>
+
+      <section aria-label="Itens faturados">
+        <h2 class="section-title">Itens faturados</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Produto</th>
+                <th class="numeric">Quantidade</th>
+                <th class="numeric">Preço unitário</th>
+                <th class="numeric">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in recibo.itens %}
+              <tr>
+                <td><span class="product-name">{{ item.produto }}</span><span class="sku">SKU {{ item.sku }}</span></td>
+                <td class="numeric">{{ item.quantidade }}</td>
+                <td class="numeric">R$ {{ '%.2f'|format(item.preco_unitario_centavos / 100)|replace('.', ',') }}</td>
+                <td class="numeric">R$ {{ '%.2f'|format(item.subtotal_centavos / 100)|replace('.', ',') }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="totals">
+        <div class="total-box">
+          <div class="total-line"><span>Total faturado</span><strong>R$ {{ '%.2f'|format(recibo.valor_total_centavos / 100)|replace('.', ',') }}</strong></div>
+        </div>
+      </div>
+
+      <footer class="receipt-footer">
+        <span><strong>TechStore</strong> · Documento de faturamento B2B</span>
+        <span>Pedido {{ recibo.numero_pedido }}</span>
+      </footer>
+    </div>
+  </main>
 </body>
 </html>

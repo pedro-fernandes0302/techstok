@@ -43,7 +43,7 @@ export const api = {
     criar: (dados: {produto_id:number;tipo:string;quantidade:number;observacao:string}) => requisicao<{mensagem:string;aviso_estoque:boolean}>('/movimentacoes', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(dados)}),
   },
   vendas: {
-    registrar: (dados: {id_cliente:number;itens:Array<{id_produto:number;quantidade:number}>}) => requisicao<{id_venda:number;numero_pedido:string;valor_total_centavos:number}>('/vendas', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(dados)}),
+    registrar: (dados: {id_cliente:number;itens:Array<{id_produto:number;quantidade:number}>}, idempotencyKey?: string) => requisicao<{id_venda:number;numero_pedido:string;valor_total_centavos:number}>('/vendas', {method:'POST', headers:{'Content-Type':'application/json', ...(idempotencyKey ? {'Idempotency-Key':idempotencyKey} : {})}, body:JSON.stringify(dados)}),
     recibo: (id:number) => requisicao<import('../types').Recibo>(`/vendas/${id}/recibo`),
     livroRazao: (venda?:number) => requisicao<import('../types').LinhaRazao[]>(`/livro-razao${venda?`?venda=${venda}`:''}`),
   },

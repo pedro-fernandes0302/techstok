@@ -37,12 +37,12 @@ POLICIES = {
     "api.sessao_api": OPERADORES,
     "auth.logout": OPERADORES,
     "auth.logout_api": OPERADORES,
+    "auth.cadastro": GERENTES,
+    "auth.cadastro_api": GERENTES,
 }
 PUBLIC_ENDPOINTS = {
     "auth.login",
-    "auth.cadastro",
     "auth.login_api",
-    "auth.cadastro_api",
 }
 
 

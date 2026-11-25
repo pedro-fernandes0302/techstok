@@ -1,6 +1,6 @@
 import sqlite3
-from flask import Blueprint, flash, redirect, render_template, request, url_for
-from db import get_db
+from flask import Blueprint, flash, redirect, render_template, request, session, url_for
+from db import get_db, run_write_transaction
 from routers.utils import converter_preco, validar_categoria_produto
 
 bp = Blueprint("novo_produto", __name__)
@@ -40,16 +40,28 @@ def novo_produto():
             return render_template("produto_form.html", categorias=categorias, fornecedores=fornecedores, dados=dados), 400
 
         try:
-            conn.execute("""
-                INSERT INTO produtos
-                (sku, nome_produto, fabricante, tipo, especificacao, modalidade, preco,
-                 estoque_atual, estoque_minimo, localizacao, id_categoria, id_fornecedor)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,             (dados["sku"].strip(), dados["nome"].strip(), dados["fabricante"].strip(),
-             "Periferico" if dados["tipo"] == "Periférico" else dados["tipo"],
-                  dados["especificacao"].strip() or None, dados["modalidade_licenca"] or None, preco, estoque,
-                  minimo, dados["localizacao"].strip(), dados["categoria_id"], dados["fornecedor_id"]))
-            conn.commit()
+            def registrar():
+                cursor = conn.execute("""
+                    INSERT INTO produtos
+                    (sku, nome_produto, fabricante, tipo, especificacao, modalidade, preco,
+                     estoque_atual, estoque_minimo, localizacao, id_categoria, id_fornecedor)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    dados["sku"].strip(), dados["nome"].strip(), dados["fabricante"].strip(),
+                    "Periferico" if dados["tipo"] == "Periférico" else dados["tipo"],
+                    dados["especificacao"].strip(),
+                    dados["modalidade_licenca"] or None, preco, estoque, minimo,
+                    dados["localizacao"].strip(), dados["categoria_id"], dados["fornecedor_id"],
+                ))
+                if estoque:
+                    conn.execute(
+                        """INSERT INTO movimentacoes
+                           (id_produto, id_usuario, tipo, quantidade, observacao)
+                           VALUES (?, ?, 'ENTRADA', ?, 'Estoque inicial do produto')""",
+                        (cursor.lastrowid, session["id_usuario"], estoque),
+                    )
+
+            run_write_transaction(conn, registrar)
         except sqlite3.IntegrityError:
             conn.rollback()
             flash("Não foi possível cadastrar: SKU já existente ou categoria/fornecedor inválido.", "danger")

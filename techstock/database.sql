@@ -49,6 +49,18 @@ CREATE TABLE produtos (
 CREATE VIEW estoque_fisico AS
 SELECT id_produto AS id_estoque, id_produto, estoque_atual AS quantidade
 FROM produtos WHERE tipo IN ('Hardware', 'Periferico');
+CREATE TRIGGER produtos_estoque_nao_negativo_insert
+BEFORE INSERT ON produtos
+WHEN NEW.estoque_atual < 0
+BEGIN
+    SELECT RAISE(ABORT, 'estoque_atual não pode ser negativo');
+END;
+CREATE TRIGGER produtos_estoque_nao_negativo_update
+BEFORE UPDATE OF estoque_atual ON produtos
+WHEN NEW.estoque_atual < 0
+BEGIN
+    SELECT RAISE(ABORT, 'estoque_atual não pode ser negativo');
+END;
 CREATE TABLE ativos_digitais (
     id_licenca INTEGER PRIMARY KEY AUTOINCREMENT,
     id_produto INTEGER NOT NULL REFERENCES produtos(id_produto) ON DELETE RESTRICT,
@@ -70,8 +82,13 @@ CREATE TABLE vendas (
     id_usuario INTEGER NOT NULL REFERENCES usuarios(id_usuario) ON DELETE RESTRICT,
     data_venda TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     status_venda TEXT NOT NULL DEFAULT 'Concluida',
-    valor_total_centavos INTEGER NOT NULL DEFAULT 0 CHECK (valor_total_centavos >= 0)
+    valor_total_centavos INTEGER NOT NULL DEFAULT 0 CHECK (valor_total_centavos >= 0),
+    idempotency_key TEXT,
+    request_hash TEXT
 );
+CREATE UNIQUE INDEX vendas_idempotency_key_unique
+ON vendas (id_usuario, idempotency_key)
+WHERE idempotency_key IS NOT NULL;
 CREATE TABLE itens_venda (
     id_item INTEGER PRIMARY KEY AUTOINCREMENT,
     id_venda INTEGER NOT NULL REFERENCES vendas(id_venda) ON DELETE RESTRICT,

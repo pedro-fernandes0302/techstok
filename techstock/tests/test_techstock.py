@@ -246,11 +246,37 @@ class TechStockTests(unittest.TestCase):
         venda = self.cliente().post("/api/vendas", json={
             "id_cliente": 1, "itens": [{"id_produto": 1, "quantidade": 1}],
         })
-        outro = self.cliente()
-        cadastro = outro.post("/api/cadastro", json={
+        self.assertEqual(app.test_client().post("/api/cadastro", json={
+            "nome": "Outro operador", "email": "outro@techstore.com", "senha": "senha-segura-123",
+        }).status_code, 401)
+        self.assertEqual(self.cliente().post("/api/cadastro", json={
+            "nome": "Outro operador", "email": "outro@techstore.com", "senha": "senha-segura-123",
+        }).status_code, 403)
+        gerente = self.cliente(GERENTE)
+        tela_login = app.test_client().get("/login")
+        self.assertNotIn(b"Criar conta de operador", tela_login.data)
+        self.assertEqual(app.test_client().get("/cadastro").status_code, 302)
+        self.assertEqual(self.cliente().get("/cadastro").status_code, 403)
+        self.assertEqual(self.cliente().post("/cadastro", data={
+            "nome": "Cadastro bloqueado", "email": "bloqueado@techstore.com", "senha": "senha-segura-123",
+        }).status_code, 403)
+        self.assertEqual(gerente.get("/cadastro").status_code, 200)
+        cadastro_html = gerente.post("/cadastro", data={
+            "nome": "Operador formulário", "email": "form@techstore.com", "senha": "senha-segura-123",
+        })
+        self.assertEqual(cadastro_html.status_code, 302)
+        conn = db.get_db()
+        try:
+            self.assertEqual(conn.execute(
+                "SELECT perfil FROM usuarios WHERE email='form@techstore.com'"
+            ).fetchone()[0], "OPERADOR")
+        finally:
+            conn.close()
+        cadastro = gerente.post("/api/cadastro", json={
             "nome": "Outro operador", "email": "outro@techstore.com", "senha": "senha-segura-123",
         })
         self.assertEqual(cadastro.status_code, 201)
+        outro = app.test_client()
         login = outro.post("/api/login", json={
             "email": "outro@techstore.com", "senha": "senha-segura-123",
         })
@@ -262,7 +288,6 @@ class TechStockTests(unittest.TestCase):
         with dono.session_transaction() as sessao:
             sessao.update({"id_usuario": 2, "perfil": "OPERADOR"})
         self.assertEqual(dono.patch("/api/usuarios/2/perfil", json={"perfil": "GERENTE"}).status_code, 403)
-        gerente = self.cliente(GERENTE)
         self.assertEqual(gerente.patch("/api/usuarios/1/perfil", json={"perfil": "OPERADOR"}).status_code, 409)
 
     def test_validacao_inteiro_estrito_e_movimentacao_digital(self):

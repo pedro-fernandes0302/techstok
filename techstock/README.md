@@ -44,8 +44,9 @@ pelo Vite.
 | Operador | `operador@techstore.com` | `operador-techstore-2026` |
 
 As senhas são armazenadas no banco como hashes Werkzeug; o SQL nunca contém
-senhas. O cadastro público cria exclusivamente usuários `OPERADOR`. Somente um
-Gerente pode promover ou rebaixar perfis pela API.
+senhas. Somente Gerentes podem cadastrar usuários Operador pela tela
+`/usuarios/novo` ou pela API autenticada. Promoções e rebaixamentos de perfil
+também exigem Gerente.
 
 ## Roteiro da demonstração em 6 passos
 
@@ -77,13 +78,29 @@ saldo; ativos digitais permanecem registrados individualmente e são associados
 de unicidade; estoque, quantidades, preços e subtotais têm `CHECK`; FKs são
 ativadas em cada conexão.
 
-Venda é executada em `BEGIN IMMEDIATE`: o bloqueio de escrita serializa as
-baixas concorrentes, e qualquer falta de saldo ou erro antes do `COMMIT`
-provoca `ROLLBACK` explícito do cabeçalho, itens, estoque, licenças e
-movimentações. Valores de venda são centavos inteiros. Triggers protegem o
-Livro-Razão, os itens e as vendas contra alterações e impedem mudar o total
-depois de fechado. Recibos de Operador são privados ao autor; Gerentes podem
-consultar todos.
+Venda e movimentação são executadas em `BEGIN IMMEDIATE`: a trava de escrita
+é obtida antes de ler o saldo, e cada baixa também exige estoque suficiente no
+próprio `UPDATE`. Em vendas, os produtos são processados por `id_produto`
+crescente; chaves digitais são marcadas como vendidas somente se ainda não
+tiverem `id_venda`. Qualquer falta de saldo ou erro antes do `COMMIT` provoca
+`ROLLBACK` explícito do cabeçalho, itens, estoque, licenças e movimentações.
+Erros transitórios de bloqueio repetem a transação inteira em até três tentativas.
+O front envia `Idempotency-Key` para evitar duplicar uma venda em reenvios; esse
+header é opcional para clientes anteriores.
+
+SQLite permite apenas um escritor por vez, portanto a estratégia serializa
+gravações e pode limitar throughput sob carga alta; não oferece locks por linha
+como PostgreSQL. `BEGIN IMMEDIATE`, o timeout de espera, os retries curtos e
+as atualizações condicionais mantêm a integridade em concorrência, mas para
+muitas gravações simultâneas o caminho de escala é migrar para PostgreSQL.
+O saldo tem `CHECK (estoque_atual >= 0)` e triggers equivalentes para proteger
+bancos legados. A migração instala essas triggers sem reescrever saldos; se
+encontrar saldo negativo existente, para sem apagar dados para que o Livro-Razão
+seja reconciliado primeiro.
+
+Valores de venda são centavos inteiros. Triggers protegem o Livro-Razão, os
+itens e as vendas contra alterações e impedem mudar o total depois de fechado.
+Recibos de Operador são privados ao autor; Gerentes podem consultar todos.
 
 Se o startup detectar um banco parcialmente criado ou sem triggers esperados,
 ele interrompe com erro em vez de apagar conteúdo. Faça backup e remova o banco
@@ -91,9 +108,10 @@ manualmente apenas se quiser recriar os dados de demonstração.
 
 ## Testes
 
-Rode a suíte a partir do diretório `techstock`:
+Rode as suítes a partir do diretório `techstock`:
 
 ```powershell
+python -m pytest -v
 python -m unittest discover -s tests -v
 ```
 
@@ -103,6 +121,8 @@ local `techstock.db`.
 ## Rotas principais
 
 - `POST /api/login`, `POST /api/cadastro` e `POST /api/logout`
+- `POST /api/cadastro` exige sessão Gerente e cria somente perfil `OPERADOR`;
+  a interface correspondente fica em `/usuarios/novo`
 - `GET /api/dashboard`, `GET /api/produtos/opcoes` e `GET /api/clientes`
 - `POST /api/vendas` e `GET /api/vendas/<id>/recibo`
 - `GET /api/vendas/<id>/recibo/imprimir`

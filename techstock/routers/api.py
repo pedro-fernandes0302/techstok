@@ -1,16 +1,30 @@
+import hashlib
+import json
 import sqlite3
 import uuid
 from decimal import Decimal
 
 from flask import Blueprint, jsonify, render_template, request, session
 
-from db import get_db
+from db import get_db, run_write_transaction
 from routers.utils import converter_centavos, normalizar_cnpj
 
 bp = Blueprint("api", __name__, url_prefix="/api")
 
 
 class EstoqueInsuficiente(Exception):
+    pass
+
+
+class RegistroInexistente(Exception):
+    pass
+
+
+class MovimentacaoNaoPermitida(Exception):
+    pass
+
+
+class ChaveIdempotenciaReutilizada(Exception):
     pass
 
 
@@ -24,6 +38,24 @@ def inteiro_estrito(valor):
     if isinstance(valor, str) and not valor.strip().isdigit():
         raise ValueError("Esperado um número inteiro.")
     return int(valor)
+
+
+def gravar_movimentacao(
+    conn, produto_id, usuario_id, tipo, quantidade, observacao=None, venda_id=None,
+):
+    conn.execute(
+        """INSERT INTO movimentacoes
+           (id_produto, id_venda, id_usuario, tipo, quantidade, observacao)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (produto_id, venda_id, usuario_id, tipo, quantidade, observacao),
+    )
+
+
+def gravar_movimentacao_venda(conn, produto_id, venda_id, usuario_id, quantidade, numero_pedido):
+    gravar_movimentacao(
+        conn, produto_id, usuario_id, "SAIDA", quantidade,
+        f"Venda {numero_pedido}", venda_id,
+    )
 
 
 @bp.get("/sessao")
@@ -212,17 +244,24 @@ def criar_produto_api():
         modalidade = None
     conn = get_db()
     try:
-        conn.execute("""
-            INSERT INTO produtos
-            (sku, nome_produto, fabricante, tipo, especificacao, modalidade, preco, estoque_atual,
-             estoque_minimo, localizacao, id_categoria, id_fornecedor)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            str(dados["sku"]).strip(), str(dados["nome"]).strip(), str(dados["fabricante"]).strip(),
-            tipo, str(dados.get("especificacao") or "").strip(), modalidade, preco, estoque, minimo,
-            str(dados["localizacao"]).strip(), categoria_id, fornecedor_id,
-        ))
-        conn.commit()
+        def registrar():
+            cursor = conn.execute("""
+                INSERT INTO produtos
+                (sku, nome_produto, fabricante, tipo, especificacao, modalidade, preco, estoque_atual,
+                 estoque_minimo, localizacao, id_categoria, id_fornecedor)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                str(dados["sku"]).strip(), str(dados["nome"]).strip(), str(dados["fabricante"]).strip(),
+                tipo, str(dados.get("especificacao") or "").strip(), modalidade, preco, estoque, minimo,
+                str(dados["localizacao"]).strip(), categoria_id, fornecedor_id,
+            ))
+            if estoque:
+                gravar_movimentacao(
+                    conn, cursor.lastrowid, session["id_usuario"], "ENTRADA",
+                    estoque, "Estoque inicial do produto",
+                )
+
+        run_write_transaction(conn, registrar)
         return jsonify({"mensagem": "Produto cadastrado com sucesso."}), 201
     except sqlite3.IntegrityError as exc:
         conn.rollback()
@@ -278,33 +317,50 @@ def criar_movimentacao_api():
         return erro("Informe tipo de movimentação e quantidade positiva.")
     conn = get_db()
     try:
-        conn.execute("BEGIN IMMEDIATE")
-        produto = conn.execute(
-            "SELECT estoque_atual, estoque_minimo, tipo FROM produtos WHERE id_produto = ?",
-            (produto_id,),
-        ).fetchone()
-        if not produto:
-            conn.rollback()
-            return erro("Produto não encontrado.", 404)
-        if produto["tipo"] == "Software":
-            conn.rollback()
-            return erro("Licença digital só movimenta por venda ou cadastro de chaves.", 409)
-        incremento = quantidade if dados["tipo"] == "ENTRADA" else -quantidade
-        cursor = conn.execute(
-            "UPDATE produtos SET estoque_atual = estoque_atual + ? WHERE id_produto = ? AND estoque_atual + ? >= 0",
-            (incremento, produto_id, incremento),
-        )
-        if cursor.rowcount != 1:
-            conn.rollback()
-            return erro(f"Estoque insuficiente: disponível {produto['estoque_atual']}.", 409)
-        conn.execute("""
-            INSERT INTO movimentacoes (id_produto, id_usuario, tipo, quantidade, observacao)
-            VALUES (?, ?, ?, ?, ?)
-        """, (produto_id, session["id_usuario"], "ENTRADA" if incremento > 0 else "SAIDA",
-              quantidade, dados.get("observacao") or None))
-        conn.commit()
-        saldo = conn.execute("SELECT estoque_atual, estoque_minimo FROM produtos WHERE id_produto = ?", (produto_id,)).fetchone()
-        return jsonify({"mensagem": "Movimentação registrada.", "aviso_estoque": saldo["estoque_atual"] <= saldo["estoque_minimo"]}), 201
+        def registrar():
+            produto = conn.execute(
+                "SELECT estoque_atual, estoque_minimo, tipo FROM produtos WHERE id_produto = ?",
+                (produto_id,),
+            ).fetchone()
+            if not produto:
+                raise RegistroInexistente("Produto não encontrado.")
+            if produto["tipo"] == "Software":
+                raise MovimentacaoNaoPermitida(
+                    "Licença digital só movimenta por venda ou cadastro de chaves."
+                )
+            incremento = quantidade if dados["tipo"] == "ENTRADA" else -quantidade
+            cursor = conn.execute(
+                """UPDATE produtos SET estoque_atual = estoque_atual + ?
+                   WHERE id_produto = ? AND estoque_atual + ? >= 0""",
+                (incremento, produto_id, incremento),
+            )
+            if cursor.rowcount != 1:
+                saldo = conn.execute(
+                    "SELECT estoque_atual FROM produtos WHERE id_produto = ?", (produto_id,),
+                ).fetchone()[0]
+                raise EstoqueInsuficiente(f"Estoque insuficiente: disponível {saldo}.")
+            tipo = "ENTRADA" if incremento > 0 else "SAIDA"
+            gravar_movimentacao(
+                conn, produto_id, session["id_usuario"], tipo, quantidade,
+                dados.get("observacao") or None,
+            )
+            saldo = conn.execute(
+                "SELECT estoque_atual, estoque_minimo FROM produtos WHERE id_produto = ?",
+                (produto_id,),
+            ).fetchone()
+            return saldo["estoque_atual"] <= saldo["estoque_minimo"]
+
+        aviso_estoque = run_write_transaction(conn, registrar)
+        return jsonify({"mensagem": "Movimentação registrada.", "aviso_estoque": aviso_estoque}), 201
+    except RegistroInexistente as exc:
+        conn.rollback()
+        return erro(str(exc), 404)
+    except MovimentacaoNaoPermitida as exc:
+        conn.rollback()
+        return erro(str(exc), 409)
+    except EstoqueInsuficiente as exc:
+        conn.rollback()
+        return erro(str(exc), 409)
     except sqlite3.Error:
         conn.rollback()
         return erro("Não foi possível registrar a movimentação.", 500)
@@ -339,74 +395,121 @@ def criar_venda_api():
             quantidades[produto_id] = quantidades.get(produto_id, 0) + quantidade
     except (KeyError, TypeError, ValueError):
         return erro("Informe cliente e itens válidos.")
+    chave_idempotencia = request.headers.get("Idempotency-Key", dados.get("idempotency_key"))
+    if chave_idempotencia is not None:
+        if not isinstance(chave_idempotencia, str) or not chave_idempotencia.strip():
+            return erro("Identificador de idempotência inválido.")
+        chave_idempotencia = chave_idempotencia.strip()
+        if len(chave_idempotencia) > 128:
+            return erro("Identificador de idempotência inválido.")
+    hash_solicitacao = hashlib.sha256(json.dumps(
+        {"cliente": cliente_id, "itens": sorted(quantidades.items())},
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")).hexdigest()
 
     conn = get_db()
     try:
-        # BEGIN IMMEDIATE serializa as vendas antes da leitura/baixa para impedir saldo negativo concorrente.
-        conn.execute("BEGIN IMMEDIATE")
-        if not conn.execute("SELECT 1 FROM clientes WHERE id_cliente = ?", (cliente_id,)).fetchone():
-            conn.rollback()
-            return erro("Cliente não encontrado.", 404)
         user_id = session.get("id_usuario")
         if not user_id:
-            conn.rollback()
             return erro("Sessão sem usuário autenticado.", 401)
-        numero_pedido = "TS-" + uuid.uuid4().hex[:12].upper()
-        cursor = conn.execute(
-            "INSERT INTO vendas (numero_pedido, id_cliente, id_usuario) VALUES (?, ?, ?)",
-            (numero_pedido, cliente_id, user_id),
-        )
-        venda_id = cursor.lastrowid
-        total_centavos = 0
-        for produto_id, quantidade in quantidades.items():
-            produto = conn.execute(
-                "SELECT sku, nome_produto, preco FROM produtos WHERE id_produto = ?",
-                (produto_id,),
-            ).fetchone()
-            if not produto:
-                raise ValueError(f"Produto {produto_id} não encontrado.")
-            saldo = conn.execute("SELECT estoque_atual FROM produtos WHERE id_produto = ?", (produto_id,)).fetchone()[0]
-            cursor = conn.execute("""
-                UPDATE produtos SET estoque_atual = estoque_atual - ?
-                WHERE id_produto = ? AND estoque_atual >= ?
-            """, (quantidade, produto_id, quantidade))
-            if cursor.rowcount != 1:
-                raise EstoqueInsuficiente(
-                    f"Estoque insuficiente para {produto['nome_produto']}: disponível {saldo}"
-                )
-            tipo_produto = conn.execute("SELECT tipo FROM produtos WHERE id_produto = ?", (produto_id,)).fetchone()["tipo"]
-            if tipo_produto == "Software":
-                licencas = conn.execute("""
-                    SELECT id_licenca FROM ativos_digitais
-                    WHERE id_produto = ? AND id_venda IS NULL ORDER BY id_licenca LIMIT ?
-                """, (produto_id, quantidade)).fetchall()
-                if len(licencas) < quantidade:
-                    disponiveis = len(licencas)
+
+        def registrar():
+            if chave_idempotencia:
+                anterior = conn.execute(
+                    """SELECT id_venda, numero_pedido, valor_total_centavos, request_hash
+                       FROM vendas WHERE id_usuario=? AND idempotency_key=?""",
+                    (user_id, chave_idempotencia),
+                ).fetchone()
+                if anterior:
+                    if anterior["request_hash"] != hash_solicitacao:
+                        raise ChaveIdempotenciaReutilizada
+                    return {
+                        "id_venda": anterior["id_venda"],
+                        "numero_pedido": anterior["numero_pedido"],
+                        "valor_total_centavos": anterior["valor_total_centavos"],
+                    }
+            if not conn.execute(
+                "SELECT 1 FROM clientes WHERE id_cliente = ?", (cliente_id,),
+            ).fetchone():
+                raise RegistroInexistente("Cliente não encontrado.")
+            # A ordem estável reduz contenção e evita deadlock em bancos com trava por linha.
+            numero_pedido = "TS-" + uuid.uuid4().hex[:12].upper()
+            cursor = conn.execute(
+                """INSERT INTO vendas
+                   (numero_pedido, id_cliente, id_usuario, idempotency_key, request_hash)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (numero_pedido, cliente_id, user_id, chave_idempotencia, hash_solicitacao),
+            )
+            venda_id = cursor.lastrowid
+            total_centavos = 0
+            for produto_id, quantidade in sorted(quantidades.items()):
+                produto = conn.execute(
+                    """SELECT sku, nome_produto, preco, tipo, estoque_atual
+                       FROM produtos WHERE id_produto = ?""",
+                    (produto_id,),
+                ).fetchone()
+                if not produto:
+                    raise ValueError(f"Produto {produto_id} não encontrado.")
+                saldo = produto["estoque_atual"]
+                cursor = conn.execute("""
+                    UPDATE produtos SET estoque_atual = estoque_atual - ?
+                    WHERE id_produto = ? AND estoque_atual >= ?
+                """, (quantidade, produto_id, quantidade))
+                if cursor.rowcount != 1:
                     raise EstoqueInsuficiente(
-                        f"Estoque insuficiente para {produto['nome_produto']}: disponíveis {disponiveis} licença(s)"
+                        f"Estoque insuficiente para {produto['nome_produto']}: disponível {saldo}"
                     )
-                conn.executemany(
-                    "UPDATE ativos_digitais SET id_venda = ? WHERE id_licenca = ?",
-                    [(venda_id, licenca["id_licenca"]) for licenca in licencas],
+                if produto["tipo"] == "Software":
+                    licencas = conn.execute("""
+                        SELECT id_licenca FROM ativos_digitais
+                        WHERE id_produto = ? AND id_venda IS NULL
+                        ORDER BY id_licenca LIMIT ?
+                    """, (produto_id, quantidade)).fetchall()
+                    if len(licencas) < quantidade:
+                        raise EstoqueInsuficiente(
+                            f"Estoque insuficiente para {produto['nome_produto']}: "
+                            f"disponíveis {len(licencas)} licença(s)"
+                        )
+                    for licenca in licencas:
+                        cursor = conn.execute(
+                            """UPDATE ativos_digitais SET id_venda = ?
+                               WHERE id_licenca = ? AND id_venda IS NULL""",
+                            (venda_id, licenca["id_licenca"]),
+                        )
+                        if cursor.rowcount != 1:
+                            raise EstoqueInsuficiente(
+                                f"Estoque insuficiente para {produto['nome_produto']}: "
+                                "a licença já foi entregue."
+                            )
+                preco_centavos = converter_centavos(Decimal(str(produto["preco"])))
+                subtotal_centavos = quantidade * preco_centavos
+                conn.execute("""
+                    INSERT INTO itens_venda
+                    (id_venda, id_produto, quantidade, preco_unitario_centavos, subtotal_centavos)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (venda_id, produto_id, quantidade, preco_centavos, subtotal_centavos))
+                gravar_movimentacao_venda(
+                    conn, produto_id, venda_id, user_id, quantidade, numero_pedido,
                 )
-            preco_centavos = converter_centavos(Decimal(str(produto["preco"])))
-            subtotal_centavos = quantidade * preco_centavos
-            conn.execute("""
-                INSERT INTO itens_venda
-                (id_venda, id_produto, quantidade, preco_unitario_centavos, subtotal_centavos)
-                VALUES (?, ?, ?, ?, ?)
-            """, (venda_id, produto_id, quantidade, preco_centavos, subtotal_centavos))
-            conn.execute("""
-                INSERT INTO movimentacoes (id_produto, id_venda, id_usuario, tipo, quantidade, observacao)
-                VALUES (?, ?, ?, 'SAIDA', ?, ?)
-            """, (produto_id, venda_id, user_id, quantidade, f"Venda {numero_pedido}"))
-            total_centavos += subtotal_centavos
-        conn.execute(
-            "UPDATE vendas SET valor_total_centavos = ? WHERE id_venda = ?",
-            (total_centavos, venda_id),
-        )
-        conn.commit()
-        return jsonify({"id_venda": venda_id, "numero_pedido": numero_pedido, "valor_total_centavos": total_centavos}), 201
+                total_centavos += subtotal_centavos
+            conn.execute(
+                "UPDATE vendas SET valor_total_centavos = ? WHERE id_venda = ?",
+                (total_centavos, venda_id),
+            )
+            return {
+                "id_venda": venda_id,
+                "numero_pedido": numero_pedido,
+                "valor_total_centavos": total_centavos,
+            }
+
+        resultado = run_write_transaction(conn, registrar)
+        return jsonify(resultado), 201
+    except ChaveIdempotenciaReutilizada:
+        conn.rollback()
+        return erro("O identificador de idempotência já foi usado em outra venda.", 409)
+    except RegistroInexistente as exc:
+        conn.rollback()
+        return erro(str(exc), 404)
     except EstoqueInsuficiente as exc:
         conn.rollback()
         return erro(str(exc), 409)

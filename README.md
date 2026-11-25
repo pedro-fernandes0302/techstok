@@ -45,8 +45,9 @@ endereço indicado pelo Vite.
 | Gerente | `gerente@techstore.com` | `demo-techstore-2026` |
 | Operador | `operador@techstore.com` | `operador-techstore-2026` |
 
-As senhas são armazenadas como hashes e nunca aparecem no SQL. Cadastro público
-cria apenas `OPERADOR`; promoção de perfil exige uma sessão Gerente.
+As senhas são armazenadas como hashes e nunca aparecem no SQL. Somente Gerentes
+podem cadastrar operadores, pela tela `f/usuarios/novo` ou pela API autenticada.
+O login não oferece cadastro público.
 
 ## Roteiro da demo em 6 passos
 

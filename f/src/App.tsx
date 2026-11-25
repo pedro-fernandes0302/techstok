@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './App.css'
+import './estoque-nuvem.css'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import NovoProduto from './pages/NovoProduto'
@@ -10,6 +11,7 @@ import Fornecedores from './pages/Fornecedores'
 import PDV from './pages/PDV'
 import LivroRazao from './pages/LivroRazao'
 import Login from './pages/Login'
+import CadastroOperador from './pages/CadastroOperador'
 
 export default function App() {
   return <BrowserRouter><Routes>
@@ -18,6 +20,7 @@ export default function App() {
     <Route path="/" element={<Dashboard />} />
     <Route path="/pdv" element={<PDV />} />
     <Route path="/livro-razao" element={<LivroRazao />} />
+    <Route path="/usuarios/novo" element={<CadastroOperador />} />
     <Route path="/produtos/novo" element={<NovoProduto />} />
     <Route path="/movimentacoes/nova" element={<NovaMovimentacao />} />
     <Route path="/movimentacoes" element={<Movimentacoes />} />

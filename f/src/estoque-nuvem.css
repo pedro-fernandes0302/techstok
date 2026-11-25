@@ -1,0 +1,54 @@
+/* Layout e diálogos personalizados do TechStock. */
+.nv-shell{min-height:100vh;display:grid;grid-template-columns:200px 1fr;grid-template-rows:56px 1fr;grid-template-areas:"side top" "side main";background:#f1f3f6;color:#2b3445}
+.nv-top{grid-area:top;background:#fff;border-bottom:1px solid #dfe3ea;display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:5}
+.nv-brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:#1d2a44;font-size:17px;text-transform:uppercase;letter-spacing:.3px}
+.nv-brand b{font-weight:800}
+.nv-top-right{display:flex;align-items:center;gap:22px;font-size:13px}
+.nv-top-right a{color:#3a4660;text-decoration:none}
+.nv-user{position:relative}
+.nv-user>button{background:none;border:0;color:#3a4660;cursor:pointer;font-size:13px}
+.nv-menu{position:absolute;right:0;top:30px;background:#fff;border:1px solid #dfe3ea;border-radius:8px;box-shadow:0 8px 24px rgba(20,30,60,.12);padding:10px;min-width:130px;display:flex;flex-direction:column;gap:8px}
+.nv-menu small{color:#8a93a6}
+.nv-menu button{border:0;background:#fdeaea;color:#c0392b;padding:7px;border-radius:6px;cursor:pointer;font-weight:600}
+.nv-side{grid-area:side;background:#0a66c2;color:#fff;display:flex;flex-direction:column;align-items:stretch;position:sticky;top:0;height:100vh;padding-top:56px}
+.nv-side nav{display:flex;flex-direction:column}
+.nv-side nav a{display:flex;align-items:center;gap:12px;padding:14px 18px;color:#fff;text-decoration:none;font-size:13px;font-weight:600;border-bottom:1px solid rgba(255,255,255,.08)}
+.nv-side nav a:hover{background:rgba(255,255,255,.1)}
+.nv-side nav a.active{background:#07508f}
+.nv-up{margin:auto auto 28px;width:34px;height:34px;border-radius:50%;border:0;background:#2f86dc;color:#fff;cursor:pointer;display:grid;place-items:center}
+.nv-main{grid-area:main;padding:26px 32px 50px;min-width:0}
+.nv-title{font-size:28px;font-weight:400;margin:0 0 18px}
+.nv-subtitle{font-size:24px;font-weight:400;margin:30px 0 16px}
+.nv-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.nv-cards article{background:#fff;border-radius:6px;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;gap:12px;box-shadow:0 1px 4px rgba(20,30,60,.08);border-left:4px solid}
+.nv-cards article span{display:block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;margin-bottom:8px}
+.nv-cards article strong{font-size:18px;font-weight:600;color:#3a4660}
+.nv-cards article svg{color:#c3c9d4;flex:none}
+.nv-cards .warn{border-color:#f6c23e}.nv-cards .warn span{color:#e0a800}
+.nv-cards .info{border-color:#4e73df}.nv-cards .info span{color:#4e73df}
+.nv-cards .ok{border-color:#1cc88a}.nv-cards .ok span{color:#17a673}
+.nv-shortcuts{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px}
+.nv-shortcuts article{background:#fff;border-radius:6px;padding:26px 16px 22px;text-align:center;box-shadow:0 1px 4px rgba(20,30,60,.08);display:flex;flex-direction:column;align-items:center;gap:14px}
+.nv-shortcuts article>svg{color:#7a8396}
+.nv-shortcuts p{margin:0;font-size:13px;color:#5b6579}
+.nv-btn{background:#0a66c2;color:#fff;text-decoration:none;padding:7px 22px;border-radius:4px;font-weight:700;font-size:13px}
+.nv-btn:hover{background:#07508f}
+@media (max-width:820px){
+  .nv-shell{grid-template-columns:58px 1fr}
+  .nv-side nav a{justify-content:center;padding:14px 0}
+  .nv-side nav a span{display:none}
+  .nv-main{padding:18px 14px 40px}
+  .nv-cards{grid-template-columns:1fr}
+  .nv-shortcuts{grid-template-columns:1fr 1fr}
+  .nv-brand strong{font-size:14px}
+}
+.confirmacao-fundo{position:fixed;inset:0;z-index:1000;background:rgba(15,23,42,.55);display:grid;place-items:center;padding:20px}
+.confirmacao-modal{width:min(100%,440px);background:#fff;border-radius:12px;padding:24px;box-shadow:0 20px 60px rgba(15,23,42,.28);color:#2b3445}
+.confirmacao-modal h2{margin:0 0 10px;font-size:20px}
+.confirmacao-modal p{margin:0;color:#5b6579;line-height:1.55}
+.confirmacao-acoes{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}
+.confirmacao-acoes button{border:0;border-radius:7px;padding:10px 16px;font:inherit;font-weight:700;cursor:pointer}
+.confirmacao-cancelar{background:#edf0f5;color:#465166}
+.confirmacao-executar{background:#0a66c2;color:#fff}
+.confirmacao-executar.perigo{background:#c0392b}
+.confirmacao-acoes button:focus-visible{outline:3px solid rgba(10,102,194,.3);outline-offset:2px}

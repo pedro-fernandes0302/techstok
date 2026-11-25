@@ -58,7 +58,6 @@ def cadastro():
     resposta = criar_operador(nome, email, senha)
     if isinstance(resposta, str):
         return render_template("cadastro.html", erro=resposta), 400
-    autenticar(email, senha)
     return redirect(url_for("dashboard.dashboard"))
 
 
